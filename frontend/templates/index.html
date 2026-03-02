@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Klingi</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div id="authModal" class="modal hidden">
+      <div class="modalContent">
+        <h2>Admin Login</h2>
+        <input id="adminPin" class="in" type="password" placeholder="Enter Admin PIN" inputmode="numeric" />
+        <button id="adminLoginBtn" class="btn">Login</button>
+        <div id="authError" class="error"></div>
+      </div>
+    </div>
+
+    <header class="topbar" role="banner">
+      <div class="brand">KLINGI</div>
+      <nav class="tabs" role="navigation" aria-label="Main">
+        <button class="tabbtn active" id="tabCamera">Camera</button>
+        <button class="tabbtn" id="tabAdmin">Admin</button>
+      </nav>
+      <div class="status" id="status">offline</div>
+    </header>
+
+    <main>
+      <section class="page" id="pageCamera" aria-labelledby="tabCamera">
+        <div class="cameraSection">
+          <div class="cameraWrap">
+            <img id="cam" alt="camera" />
+            <div class="overlay" id="overlay"></div>
+          </div>
+
+          <div class="controlPanel">
+            <div class="modeButtons">
+              <button class="modeBtn away" aria-label="Away Mode">😴 Away</button>
+              <button class="modeBtn home active" aria-label="Home Mode">🏠 Home</button>
+            </div>
+
+            <div class="quickActions">
+              <div class="actionRow">
+                <input id="pin" class="pin" placeholder="PIN" inputmode="numeric" aria-label="PIN" />
+                <button id="pinBtn" class="btn">Send PIN</button>
+              </div>
+              <button id="unlockBtn" class="btn fullWidth">Unlock Door</button>
+            </div>
+
+            <div class="eventLog" id="log" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page hidden" id="pageAdmin" aria-labelledby="tabAdmin">
+        <div class="adminGrid">
+          <div class="card">
+            <h3>Enroll Face</h3>
+            <input id="enrollName" class="in" placeholder="Name" />
+            <button id="enrollBtn" class="btn">Capture & Enroll</button>
+            <div class="hint">Face will be captured from live camera. Look at the camera for best results.</div>
+          </div>
+
+          <div class="card">
+            <h3>Faces</h3>
+            <button id="refreshFaces" class="btn">Refresh</button>
+            <div id="facesList" class="list"></div>
+          </div>
+
+          <div class="card">
+            <h3>Logs</h3>
+            <button id="refreshLogs" class="btn">Refresh</button>
+            <div id="logsList" class="list"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js?v=2" defer></script>
+  </body>
+</html>
