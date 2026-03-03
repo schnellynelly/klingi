@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Klingi</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <div id="authModal" class="modal hidden">
+        <div class="modalContent">
+          <h2>Admin Login</h2>
+          <input id="adminPin" class="in" type="password" placeholder="Enter Admin PIN" inputmode="numeric" />
+          <button id="adminLoginBtn" class="btn">Login</button>
+          <div id="authError" class="error"></div>
+        </div>
+      </div>
+
+      <!-- Two-Way Audio Modal -->
+      <div id="audioModal" class="modal hidden">
+        <div class="modalContent audioModalContent">
+          <h2>Talk to Visitor</h2>
+          <div class="audioStatus" id="audioStatus">Ready to speak</div>
+          <div class="audioControls">
+            <button id="startAudioBtn" class="btn btnPrimary" style="flex:1;">
+              <span id="audioButtonText">🎤 Start</span>
+            </button>
+            <button id="closeAudioBtn" class="btn" style="flex:1;">Close</button>
+          </div>
+          <div class="audioHint">Your voice will be played through the door speaker</div>
+        </div>
+      </div>
+
+      <!-- Home: Camera Feed with Actions -->
+      <section class="page active" id="pageHome">
+        <div class="cameraContainer">
+          <!-- Full-screen camera feed -->
+          <img id="cam" alt="camera" class="cameraFeed" />
+          
+          <!-- LIVE indicator -->
+          <div class="liveIndicator">
+            <span class="livePulse"></span>
+            LIVE
+          </div>
+
+          <!-- Floating Action Buttons -->
+          <div class="fabContainer">
+            <button id="talkBtn" class="fab fabPrimary" title="Talk">
+              <span>🎤</span>
+            </button>
+            <button id="unlockBtn" class="fab fabAccent" title="Unlock">
+              <span>🔓</span>
+            </button>
+            <button id="sirenBtn" class="fab" title="Siren">
+              <span>🔔</span>
+            </button>
+          </div>
+
+          <!-- Overlay canvas for face tracking -->
+          <div class="overlay" id="overlay"></div>
+        </div>
+
+        <!-- Quick Info Bar -->
+        <div class="infoBar">
+          <div class="infoItem">
+            <span class="infoLabel">Front Door</span>
+            <span class="infoStatus online">Online</span>
+          </div>
+          <div class="infoItem">
+            <span class="infoLabel">Activity</span>
+            <span class="infoValue" id="activityCount">0</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Activity: Motion & Event Logs -->
+      <section class="page" id="pageActivity">
+        <div class="pageHeader">
+          <h1>Activity</h1>
+        </div>
+        <div class="pageContent">
+          <div id="activityList" class="activityList">
+            <div class="emptyState">
+              <div class="emptyIcon">📭</div>
+              <div class="emptyText">No recent activity</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Devices: Manage all devices -->
+      <section class="page" id="pageDevices">
+        <div class="pageHeader">
+          <h1>Devices</h1>
+        </div>
+        <div class="pageContent">
+          <div class="deviceCard">
+            <div class="deviceInfo">
+              <div class="deviceName">Front Door</div>
+              <div class="deviceStatus">Online • 94% Battery</div>
+            </div>
+            <div class="deviceIndicator online"></div>
+          </div>
+
+          <div class="section">
+            <h3>Quick Actions</h3>
+            <div class="actionGrid">
+              <button id="recognizeBtn" class="actionButton">
+                <span class="actionIcon">🔍</span>
+                <span class="actionLabel">Recognize</span>
+              </button>
+              <button id="sirenDeviceBtn" class="actionButton">
+                <span class="actionIcon">🔔</span>
+                <span class="actionLabel">Siren</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>PIN Unlock</h3>
+            <div class="pinGroup">
+              <input id="pin" class="pinInput" placeholder="Enter PIN" inputmode="numeric" />
+              <button id="pinBtn" class="btn btnPrimary">Send</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings: Admin panel -->
+      <section class="page" id="pageSettings">
+        <div class="pageHeader">
+          <h1>Settings</h1>
+        </div>
+        <div class="pageContent">
+          <!-- Face Enrollment Section -->
+          <div class="section enrollSection">
+            <h3>📸 Enroll New Face</h3>
+            <p style="color:var(--text-secondary);font-size:13px;margin:8px 0;">Add a new person to the system</p>
+            <div class="settingItem">
+              <input id="enrollName" class="in" placeholder="Enter person's name" />
+              <button id="enrollBtn" class="btn btnPrimary">Capture & Enroll</button>
+            </div>
+            <div class="hint">✓ Look directly at the camera<br/>✓ Blink naturally or move your head<br/>✓ Good lighting recommended</div>
+          </div>
+
+          <!-- Enrolled Faces Section -->
+          <div class="section facesSection">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <h3>👥 Enrolled Faces</h3>
+              <button id="refreshFaces" class="btn btnSecondary" style="padding:6px 12px;font-size:12px;">Refresh</button>
+            </div>
+            <div id="facesList" class="list" style="margin-top:12px;"></div>
+          </div>
+
+          <!-- Activity Log Section -->
+          <div class="section logsSection">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <h3>📋 Event Logs</h3>
+              <button id="refreshLogs" class="btn btnSecondary" style="padding:6px 12px;font-size:12px;">Refresh</button>
+            </div>
+            <div id="logsList" class="list" style="margin-top:12px;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bottom Navigation -->
+      <nav class="bottomNav">
+        <button class="navItem active" id="navHome" data-page="pageHome">
+          <span class="navIcon">🏠</span>
+          <span class="navLabel">Home</span>
+        </button>
+        <button class="navItem" id="navActivity" data-page="pageActivity">
+          <span class="navIcon">📋</span>
+          <span class="navLabel">Activity</span>
+        </button>
+        <button class="navItem" id="navDevices" data-page="pageDevices">
+          <span class="navIcon">📱</span>
+          <span class="navLabel">Devices</span>
+        </button>
+        <button class="navItem" id="navSettings" data-page="pageSettings">
+          <span class="navIcon">⚙️</span>
+          <span class="navLabel">Settings</span>
+        </button>
+      </nav>
+    </div>
+
+    <script src="/static/app.js?v=3" defer></script>
+  </body>
+</html>
