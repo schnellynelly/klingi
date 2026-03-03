@@ -154,7 +154,12 @@
       const data = await res.json();
       
       if(data.ok && data.bbox){
-        drawBoundingBox(data.bbox);
+        // If we have a recognized name, show it with the box
+        if(lastRecognizedName){
+          drawBoundingBoxWithName(data.bbox, lastRecognizedName);
+        } else {
+          drawBoundingBox(data.bbox);
+        }
       } else {
         if($overlay) $overlay.innerHTML = '';
       }
@@ -199,6 +204,70 @@
     
     const svg = `<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
       <rect x="${boxX}" y="${boxY}" width="${size}" height="${size}" fill="none" stroke="#10b981" stroke-width="3" rx="8"/>
+    </svg>`;
+    
+    $overlay.innerHTML = svg;
+  }
+
+  // Track last recognized face name to display under bbox
+  let lastRecognizedName = null;
+  let recognitionTimeout = null;
+
+  function updateFaceBoxWithName(name){
+    lastRecognizedName = name;
+    // Clear any existing timeout
+    if(recognitionTimeout) clearTimeout(recognitionTimeout);
+    // Clear name after 3 seconds
+    recognitionTimeout = setTimeout(()=>{
+      lastRecognizedName = null;
+    }, 3000);
+  }
+
+  function drawBoundingBoxWithName(bbox, name){
+    if(!bbox || !$cam || !$overlay) return;
+    
+    const [x1, y1, x2, y2] = bbox;
+    
+    // Get the actual displayed image dimensions
+    const imgRect = $cam.getBoundingClientRect();
+    const imgW = imgRect.width;
+    const imgH = imgRect.height;
+    
+    // Get original image dimensions from the image element
+    const origW = $cam.naturalWidth || 640;
+    const origH = $cam.naturalHeight || 480;
+    
+    // Calculate scale factors
+    const scaleX = imgW / origW;
+    const scaleY = imgH / origH;
+    
+    // Scale bounding box coordinates
+    const sx1 = x1 * scaleX;
+    const sy1 = y1 * scaleY;
+    const sx2 = x2 * scaleX;
+    const sy2 = y2 * scaleY;
+    
+    const w = sx2 - sx1;
+    const h = sy2 - sy1;
+    
+    // Create square bounding box centered on face
+    const size = Math.max(w, h);
+    const cx = (sx1 + sx2) / 2;
+    const cy = (sy1 + sy2) / 2;
+    const boxX = cx - size / 2;
+    const boxY = cy - size / 2;
+    
+    // Position name label below the box
+    const labelY = boxY + size + 10;
+    const labelX = cx;
+    
+    const svg = `<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+      <!-- Bounding box -->
+      <rect x="${boxX}" y="${boxY}" width="${size}" height="${size}" fill="none" stroke="#10b981" stroke-width="3" rx="8"/>
+      <!-- Name label background -->
+      <rect x="${labelX - 50}" y="${labelY}" width="100" height="24" fill="rgba(16,185,129,0.9)" rx="4"/>
+      <!-- Name text -->
+      <text x="${labelX}" y="${labelY + 16}" text-anchor="middle" fill="white" font-size="12" font-weight="bold" font-family="system-ui">${name}</text>
     </svg>`;
     
     $overlay.innerHTML = svg;
@@ -599,6 +668,8 @@
           
           if(msg.event === 'recognized'){
             addActivity('Face recognized: ' + msg.detail, '✅');
+            // Update the name to display on the bbox
+            updateFaceBoxWithName(msg.detail);
             // Show name overlay on camera feed
             showRecognizedFace(msg.detail);
             // Auto-unlock after a short delay

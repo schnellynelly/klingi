@@ -118,6 +118,8 @@ openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 36
 uvicorn app.main:app --ssl-keyfile=key.pem --ssl-certfile=cert.pem
 ```
 
+**👉 See [HTTPS_SETUP.md](HTTPS_SETUP.md) for detailed setup instructions**
+
 ## 📂 Folder Structure
 
 ```
@@ -178,6 +180,25 @@ PIN=1234
 FACE_THRESHOLD=0.28
 ```
 
+## 📚 Documentation Guides
+
+### [HTTPS Setup Guide](HTTPS_SETUP.md)
+Complete guide for setting up HTTPS:
+- **ngrok** for quick testing (recommended)
+- **Self-signed certificates** for localhost
+- **Let's Encrypt** for production domains
+- Troubleshooting microphone access
+- Cloud hosting options (AWS, Heroku, Linode)
+
+### [Face Enrollment Guide](FACE_ENROLLMENT.md)
+Step-by-step face registration:
+- How to enroll new people
+- Liveness detection (blink & movement)
+- View and delete enrolled faces
+- Testing face recognition
+- Troubleshooting enrollment issues
+- Tips for best recognition accuracy
+
 ## 🔌 API Endpoints
 
 ### Authentication
@@ -211,6 +232,8 @@ FACE_THRESHOLD=0.28
 3. **Enrollment** - Go to Settings → Enroll New Face
 4. **Talk** - Use microphone button for two-way audio
 5. **Activity** - Check Activity tab for event history
+
+**👉 See [ENROLLMENT.md](ENROLLMENT.md) for detailed enrollment documentation**
 
 ## 🔒 Security Notes
 
@@ -320,4 +343,4 @@ For issues and questions:
 
 **Made with ❤️ for smart home security**
 
-**Status**: Production-Ready | **Version**: 1.0.0 | **Last Updated**: 2024
+**Status**: Production-Ready | **Version**: 1.0.0 | **Last Updated**: 2026
