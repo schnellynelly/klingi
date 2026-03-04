@@ -19,8 +19,11 @@
   const $facesList = qs('#facesList');
   const $logsList = qs('#logsList');
 
-  const ADMIN_PIN = '1234';
   let isAdminAuthed = false;
+  let lastRecognizedName = null;
+  let clearWelcomeTimer = null;
+  let pendingPageRequest = null;
+  let lastRingAt = 0;
   let currentFrameBlob = null;
   let faceTrackingActive = false;
   let audioStream = null;
@@ -46,14 +49,37 @@
   isAdminAuthed = checkAdminAuth();
   if(!isAdminAuthed) $authModal.classList.remove('hidden');
 
-  $adminLoginBtn?.addEventListener('click', ()=>{
-    const pin = $adminPin.value.trim();
-    if(pin === ADMIN_PIN){
-      setAdminAuth(true);
-      $adminPin.value = '';
-      $authError.textContent = '';
-    }else{
-      $authError.textContent = 'Invalid PIN';
+  // Admin login: use backend /api/admin/login to validate (separate from door PIN)
+  $adminLoginBtn?.addEventListener('click', async ()=>{
+    const pin = $adminPin.value ? $adminPin.value.trim() : '';
+    if(!pin){
+      $authError.textContent = 'Enter PIN';
+      return;
+    }
+    $authError.textContent = '';
+    showLoader(true);
+    try{
+      const res = await fetch('/api/admin/login', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({pin})});
+      const j = await res.json();
+      if(j.ok){
+        setAdminAuth(true);
+        $adminPin.value = '';
+        $authError.textContent = '';
+        showToast('Admin authenticated');
+        // if user requested a page (e.g., Settings) before auth, navigate there now
+        if(pendingPageRequest){
+          goToPage(pendingPageRequest);
+          pendingPageRequest = null;
+        }
+      } else {
+        $authError.textContent = 'Invalid PIN';
+      }
+    }catch(e){
+      console.error('admin login error', e);
+      $authError.textContent = 'Network error';
+      showBanner('Backend offline');
+    }finally{
+      showLoader(false);
     }
   });
 
@@ -83,6 +109,12 @@
   $navItems.forEach(item => {
     item.addEventListener('click', ()=>{
       const pageId = item.dataset.page;
+      // If user requests Settings and is not authed, prompt for admin login first
+      if(pageId === 'pageSettings' && !isAdminAuthed){
+        pendingPageRequest = pageId;
+        $authModal.classList.remove('hidden');
+        return;
+      }
       goToPage(pageId);
     });
   });
@@ -93,7 +125,8 @@
 
   function startCameraPolling(){
     if(pollInterval) return;
-    pollInterval = setInterval(pollCamera, 50);
+    // refresh ~12.5 fps (80ms) to reduce load
+    pollInterval = setInterval(pollCamera, 80);
   }
 
   function stopCameraPolling(){
@@ -154,11 +187,31 @@
       const data = await res.json();
       
       if(data.ok && data.bbox){
-        // If we have a recognized name, show it with the box
-        if(lastRecognizedName){
-          drawBoundingBoxWithName(data.bbox, lastRecognizedName);
-        } else {
-          drawBoundingBox(data.bbox);
+        // If backend returned a recognized name with the detect call, display it
+        const name = data.name || data.recognized_name || data.label || null;
+        if(name){
+          setTemporaryRecognition(name);
+        }
+        drawBoundingBoxWithStatus(data.bbox);
+
+        // If detect did not include a name, attempt a lightweight recognition call
+        // but throttle to avoid overloading backend (once per 3s)
+        if(!name){
+          try{
+            const now = Date.now();
+            if(now - lastRingAt > 3000){
+              lastRingAt = now;
+              // fire-and-forget but handle response to update UI
+              apiPost('/api/ring', {}).then(rj => {
+                if(rj && rj.ok){
+                  const rname = rj.name || '';
+                  if(rname) setTemporaryRecognition(rname);
+                }
+              }).catch(e => {
+                console.debug('auto ring failed', e);
+              });
+            }
+          }catch(e){ console.debug('auto-recog error', e); }
         }
       } else {
         if($overlay) $overlay.innerHTML = '';
@@ -166,6 +219,16 @@
     }catch(e){
       console.debug('face tracking error', e);
     }
+  }
+
+  // Show a recognized name temporarily (clears after timeout)
+  function setTemporaryRecognition(name){
+    lastRecognizedName = name;
+    // clear previous timeout
+    if(recognitionTimeout) clearTimeout(recognitionTimeout);
+    recognitionTimeout = setTimeout(()=>{
+      lastRecognizedName = null;
+    }, 3000);
   }
 
   function drawBoundingBox(bbox){
@@ -209,17 +272,107 @@
     $overlay.innerHTML = svg;
   }
 
-  // Track last recognized face name to display under bbox
-  let lastRecognizedName = null;
+  // Track face recognition status
+  let lastUnknownDetected = false;
   let recognitionTimeout = null;
 
-  function updateFaceBoxWithName(name){
+  function updateFaceRecognitionStatus(name){
     lastRecognizedName = name;
+    lastUnknownDetected = false;
     // Clear any existing timeout
     if(recognitionTimeout) clearTimeout(recognitionTimeout);
+  }
+
+  function markFaceAsUnknown(){
+    lastRecognizedName = null;
+    lastUnknownDetected = true;
+    // Clear any existing timeout
+    if(recognitionTimeout) clearTimeout(recognitionTimeout);
+  }
+
+  function drawBoundingBoxWithStatus(bbox){
+    if(!bbox || !$cam || !$overlay) return;
+    
+    const [x1, y1, x2, y2] = bbox;
+    
+    // Get the actual displayed image dimensions
+    const imgRect = $cam.getBoundingClientRect();
+    const imgW = imgRect.width;
+    const imgH = imgRect.height;
+    
+    // Get original image dimensions from the image element
+    const origW = $cam.naturalWidth || 640;
+    const origH = $cam.naturalHeight || 480;
+    
+    // Calculate scale factors
+    const scaleX = imgW / origW;
+    const scaleY = imgH / origH;
+    
+    // Scale bounding box coordinates
+    const sx1 = x1 * scaleX;
+    const sy1 = y1 * scaleY;
+    const sx2 = x2 * scaleX;
+    const sy2 = y2 * scaleY;
+    
+    const w = sx2 - sx1;
+    const h = sy2 - sy1;
+    
+    // Create square bounding box centered on face
+    const size = Math.max(w, h);
+    const cx = (sx1 + sx2) / 2;
+    const cy = (sy1 + sy2) / 2;
+    const boxX = cx - size / 2;
+    const boxY = cy - size / 2;
+    
+    // Determine status and colors
+    let statusText = 'Unknown';
+    let boxColor = '#ef4444';      // Red for unknown
+    let labelBg = 'rgba(239,68,68,0.9)';  // Red background
+    
+    if(lastRecognizedName){
+      statusText = lastRecognizedName;
+      boxColor = '#10b981';      // Green for recognized
+      labelBg = 'rgba(16,185,129,0.9)';  // Green background
+    }
+
+    // Position label below the box (centered)
+    const labelY = boxY + size + 10;
+    const labelX = cx;
+
+    // estimate label width from text length to keep it centered
+    const approxCharWidth = 8; // px
+    const padding = 24;
+    const maxWidth = Math.min(280, size * 1.2 + 40);
+    let labelWidth = Math.min(maxWidth, Math.max(80, statusText.length * approxCharWidth + padding));
+
+    const rectX = labelX - labelWidth / 2;
+
+    // Single centered text (includes icon) to avoid misalignment on long names
+    const displayText = (lastRecognizedName ? '✅ ' : '❌ ') + statusText;
+
+    const svg = `<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+      <!-- Bounding box -->
+      <rect x="${boxX}" y="${boxY}" width="${size}" height="${size}" fill="none" stroke="${boxColor}" stroke-width="3" rx="8"/>
+      <!-- Name/Status label background (centered) -->
+      <rect x="${rectX}" y="${labelY}" width="${labelWidth}" height="28" fill="${labelBg}" rx="6"/>
+      <!-- Centered text -->
+      <text x="${labelX}" y="${labelY + 18}" text-anchor="middle" fill="white" font-size="12" font-weight="bold" font-family="system-ui">${displayText}</text>
+    </svg>`;
+
+    $overlay.innerHTML = svg;
+  }
+
+  // Track last recognized face name to display under bbox
+  let lastFaceName = null;
+  let faceTimeout = null;
+
+  function updateFaceBoxWithName(name){
+    lastFaceName = name;
+    // Clear any existing timeout
+    if(faceTimeout) clearTimeout(faceTimeout);
     // Clear name after 3 seconds
-    recognitionTimeout = setTimeout(()=>{
-      lastRecognizedName = null;
+    faceTimeout = setTimeout(()=>{
+      lastFaceName = null;
     }, 3000);
   }
 
@@ -284,7 +437,81 @@
       return await res.json();
     }catch(e){
       console.error(e);
+      showBanner('Backend offline');
       return { ok: false, error: 'network' };
+    }
+  }
+
+  // UI helpers: loader, banner, toast, welcome
+  function showLoader(visible){
+    let el = document.getElementById('globalLoader');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'globalLoader';
+      el.className = 'globalLoader hidden';
+      el.innerHTML = '<div class="spinner"></div>';
+      document.body.appendChild(el);
+    }
+    if(visible) el.classList.remove('hidden'); else el.classList.add('hidden');
+  }
+
+  function showBanner(msg){
+    let b = document.getElementById('backendBanner');
+    if(!b){
+      b = document.createElement('div');
+      b.id = 'backendBanner';
+      b.className = 'backendBanner';
+      document.body.appendChild(b);
+    }
+    b.textContent = msg;
+    b.classList.remove('hidden');
+  }
+
+  function hideBanner(){
+    const b = document.getElementById('backendBanner');
+    if(b) b.classList.add('hidden');
+  }
+
+  function showToast(msg){
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(()=>{ t.classList.add('visible'); }, 20);
+    setTimeout(()=>{ t.classList.remove('visible'); setTimeout(()=>t.remove(),300); }, 3000);
+  }
+
+  // Capture prompt overlay shown during enrollment guidance
+  function showCapturePrompt(text){
+    let el = document.getElementById('capturePrompt');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'capturePrompt';
+      el.className = 'capturePrompt';
+      document.querySelector('.cameraContainer')?.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('visible');
+  }
+
+  function hideCapturePrompt(){
+    const el = document.getElementById('capturePrompt');
+    if(el) el.classList.remove('visible');
+  }
+
+  function setWelcomeName(name){
+    try{ hideBanner(); }catch(e){}
+    lastRecognizedName = name;
+    const el = document.getElementById('welcomeName');
+    if(el){
+      el.textContent = name ? `Welcome, ${name}` : '';
+    }
+    if(clearWelcomeTimer) clearTimeout(clearWelcomeTimer);
+    if(name){
+      clearWelcomeTimer = setTimeout(()=>{
+        lastRecognizedName = null;
+        if(el) el.textContent = '';
+      }, 10000);
     }
   }
 
@@ -310,19 +537,23 @@
 
   async function startAudioRecording(){
     try{
+      // Check secure context: microphone requires HTTPS except on localhost
+      const host = location.hostname;
+      const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+      const isSecureContext = location.protocol === 'https:' || isLocal;
+      if(!isSecureContext){
+        // show guidance banner and stop
+        showBanner('Microphone requires a secure connection (HTTPS). Use ngrok or HTTPS. See /HTTPS_SETUP.md');
+        return;
+      }
+
       // Check if getUserMedia is supported and available
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         $audioStatus.textContent = 'Microphone API not available';
         $audioStatus.style.backgroundColor = 'rgba(239,68,68,0.1)';
         $audioStatus.style.borderColor = '#ef4444';
         $audioStatus.style.color = '#ef4444';
-        
-        // Show helpful error message
-        const isHTTP = location.protocol === 'http:';
-        const message = isHTTP 
-          ? 'Microphone requires HTTPS connection for security reasons. Please use HTTPS.'
-          : 'Your browser does not support microphone access. Please use Chrome, Firefox, Safari, or Edge.';
-        alert(message);
+        alert('Your browser does not support microphone access. Please use Chrome, Firefox, Safari, or Edge.');
         return;
       }
       
@@ -344,48 +575,52 @@
       $audioStatus.style.borderColor = '#ef4444';
       $audioStatus.style.color = '#ef4444';
       
-      // Create MediaRecorder to capture audio
-      mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
-      const audioChunks = [];
-      
-      mediaRecorder.ondataavailable = (event)=>{
-        audioChunks.push(event.data);
-      };
-      
-      mediaRecorder.onstop = async ()=>{
-        // Create blob from audio chunks
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        
+      // Create MediaRecorder to capture audio and stream small chunks to backend for low latency
+      const preferredTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus'
+      ];
+      let mime = '';
+      for(const t of preferredTypes){ if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)){ mime = t; break; } }
+      try{
+        mediaRecorder = mime ? new MediaRecorder(audioStream, { mimeType: mime }) : new MediaRecorder(audioStream);
+      }catch(e){
+        console.warn('MediaRecorder creation failed for mime', mime, e);
+        mediaRecorder = new MediaRecorder(audioStream);
+      }
+
+      // Send each dataavailable chunk immediately to backend to play on door speaker
+      mediaRecorder.ondataavailable = async (event)=>{
         try{
-          $audioStatus.textContent = 'Sending audio...';
-          
-          // Send audio to backend
+          if(!event.data || event.data.size === 0) return;
+          const chunk = event.data;
           const formData = new FormData();
-          formData.append('audio', audioBlob, 'audio.webm');
-          
-          const res = await fetch('/api/audio', {
-            method: 'POST',
-            body: formData
-          });
-          
-          const data = await res.json();
-          
+          // set filename with timestamp
+          const filename = `audio_${Date.now()}.webm`;
+          formData.append('audio', chunk, filename);
+          // fire-and-forget but still await to show status
+          $audioStatus.textContent = 'Sending audio chunk...';
+          const res = await fetch('/api/audio', { method: 'POST', body: formData });
           if(res.ok){
-            $audioStatus.textContent = 'Audio sent successfully';
-            $audioStatus.style.backgroundColor = 'rgba(16,185,129,0.1)';
-            $audioStatus.style.borderColor = '#10b981';
-            $audioStatus.style.color = '#10b981';
-            addActivity('Two-way audio sent', '🎤');
+            $audioStatus.textContent = 'Streaming audio...';
           } else {
-            $audioStatus.textContent = 'Failed to send audio';
+            $audioStatus.textContent = 'Failed to send chunk';
           }
-        }catch(e){
-          $audioStatus.textContent = 'Error: ' + e.message;
-          console.error('Audio send error', e);
+        }catch(err){
+          console.error('chunk send error', err);
+          showBanner('Backend offline');
         }
       };
-      
-      mediaRecorder.start();
+
+      mediaRecorder.onstop = ()=>{
+        // indicate finished
+        $audioStatus.textContent = 'Finished recording';
+        addActivity('Two-way audio sent', '🎤');
+      };
+
+      // Start with small timeslice (150ms) for lower latency
+      try{ mediaRecorder.start(150); } catch(e){ mediaRecorder.start(); }
       
       // Auto-stop after 30 seconds
       setTimeout(()=>{
@@ -456,14 +691,23 @@
   });
 
   qs('#recognizeBtn')?.addEventListener('click', async ()=>{
-    showNotification('Recognizing face...');
-    const res = await apiPost('/api/ring', {});
-    if(res.ok){
-      showNotification('✓ ' + res.name);
-      addActivity('Face recognized: ' + res.name, '🟢');
-    } else {
-      showNotification('✗ Unknown face');
-      addActivity('Unknown face detected', '🔴');
+    showLoader(true);
+    try{
+      const res = await apiPost('/api/ring', {});
+      if(res.ok){
+        const name = res.name || '';
+        setWelcomeName(name);
+        showToast('✓ ' + (name || 'Recognized'));
+        addActivity('Face recognized: ' + (name || 'unknown'), '🟢');
+      } else {
+        showToast('✗ Unknown face');
+        addActivity('Unknown face detected', '🔴');
+      }
+    }catch(e){
+      console.error('recognize error', e);
+      showBanner('Backend offline');
+    }finally{
+      showLoader(false);
     }
   });
 
@@ -485,86 +729,169 @@
   });
 
   qs('#enrollBtn')?.addEventListener('click', async ()=>{
+    const enrollBtn = qs('#enrollBtn');
+    const nameInput = qs('#enrollName');
+    const enrollError = qs('#enrollError');
+
     if(!isAdminAuthed){
-      alert('Admin authentication required');
+      // prompt admin login
+      $authModal.classList.remove('hidden');
       return;
     }
-    const name = qs('#enrollName')?.value?.trim();
+
+    const name = nameInput ? nameInput.value.trim() : '';
     if(!name){
-      alert('Enter a name');
+      if(enrollError){ enrollError.style.display='block'; enrollError.textContent='Enter a person name'; }
       return;
     }
-    
-    showNotification('Starting enrollment...');
-    const livenessRes = await captureLivenessFrames();
-    
-    if(!livenessRes.is_live){
-      alert('Liveness check failed. Try again.');
-      return;
-    }
-    
+    if(enrollError){ enrollError.style.display='none'; enrollError.textContent=''; }
+
+    if(enrollBtn) enrollBtn.disabled = true;
+    // Switch user to Home so they can align with the camera for capture
+    goToPage('pageHome');
+    showToast('Switched to Home. Follow the on-screen prompts to capture.');
+    // give camera a moment to start updating frames (short)
+    await new Promise(r => setTimeout(r, 400));
     try{
-      const frameRes = await fetch('/frame.jpg');
-      const blob = await frameRes.blob();
-      const reader = new FileReader();
-      reader.onload = async ()=>{
-        const b64 = reader.result.split(',')[1];
-        const res = await apiPost('/api/faces/enroll', { name, image_b64: b64 });
-        if(res.ok){
-          showNotification('Face enrolled: ' + name);
-          qs('#enrollName').value = '';
-          loadFaces();
-        } else {
-          alert('Enrollment failed');
+      const livenessRes = await captureLivenessFrames(4, enrollError);
+      if(!livenessRes || !livenessRes.is_live){
+        if(enrollError){ enrollError.style.display='block'; enrollError.textContent='Liveness check failed. Try again.'; }
+        return;
+      }
+
+      // reuse last captured frame from liveness to avoid extra fetch and speed up
+      const frames = (livenessRes && livenessRes.frames) || [];
+      const b64 = frames.length ? frames[frames.length - 1] : null;
+      if(!b64){
+        if(enrollError){ enrollError.style.display='block'; enrollError.textContent='Failed to capture frame'; }
+        return;
+      }
+
+      showLoader(true);
+      const res = await apiPost('/api/faces/enroll', { name, image_b64: b64 });
+      if(res.ok){
+        showToast('Face enrolled: ' + name);
+        if(nameInput) nameInput.value = '';
+        await loadFaces();
+        // Try to tell backend to reload face models (if supported)
+        try{
+          const reload = await apiPost('/api/faces/reload', {});
+          if(reload && reload.ok){
+            showToast('Face model reloaded');
+          }
+        }catch(e){
+          // ignore if endpoint not present
+          console.debug('faces reload not available', e);
         }
-      };
-      reader.readAsDataURL(blob);
+
+        // Attempt an immediate recognition on the current frame to verify enrollment
+        try{
+          const ringRes = await apiPost('/api/ring', {});
+          if(ringRes && ringRes.ok){
+            const rname = ringRes.name || '';
+            setWelcomeName(rname);
+            showToast('✓ ' + (rname || 'Recognized'));
+            addActivity('Face recognized: ' + (rname || 'unknown'), '🟢');
+          } else {
+            showToast('Enrollment complete — move in front of the camera to verify');
+          }
+        }catch(e){
+          console.debug('auto-recognize after enroll failed', e);
+          showToast('Enrollment complete — move in front of the camera to verify');
+        }
+      } else {
+        const msg = res.error || 'Enrollment failed';
+        if(enrollError){ enrollError.style.display='block'; enrollError.textContent = msg; }
+      }
     }catch(e){
-      alert('Enrollment error: ' + e.message);
+      console.error('Enrollment error', e);
+      showBanner('Backend offline');
+      if(enrollError){ enrollError.style.display='block'; enrollError.textContent = e.message || 'Enrollment error'; }
+    }finally{
+      if(enrollBtn) enrollBtn.disabled = false;
+      showLoader(false);
     }
   });
 
-  async function captureLivenessFrames(){
+  // capture liveness frames; default to 4 frames for faster enrollment
+  async function captureLivenessFrames(frameCount = 3, statusElement = null){
+    // Do not show global loader during guided capture so user can see prompts/camera
     const frames = [];
-    for(let i = 0; i < 8; i++){
-      try{
-        const frameRes = await fetch('/frame.jpg');
-        const blob = await frameRes.blob();
-        const reader = new FileReader();
-        const b64 = await new Promise((resolve)=>{
-          reader.onload = ()=>resolve(reader.result.split(',')[1]);
-          reader.readAsDataURL(blob);
-        });
-        frames.push(b64);
-        await new Promise(r => setTimeout(r, 200));
-      }catch(e){
-        console.error('Frame capture error', e);
-      }
-    }
-    
-    if(frames.length < 3) return { ok: false, is_live: false };
-    
     try{
-      return await apiPost('/api/liveness/check', { frames });
+      // friendly prompts for the controller to guide movement/blink
+      const prompts = [];
+      // more explicit guidance: instruct to follow instructions, blink twice, turn head left/right, etc.
+      const basePrompts = [
+        '(Follow instructions) Blink twice',
+        'Turn head left',
+        'Turn head right',
+        'Look center and smile'
+      ];
+      for(let i=0;i<frameCount;i++) prompts.push(basePrompts[i] || 'Hold still');
+
+      for(let i = 0; i < frameCount; i++){
+        try{
+          const prompt = prompts[i] || `Frame ${i+1}/${frameCount}`;
+          // show a larger capture prompt near the camera feed
+          showCapturePrompt(prompt);
+          if(statusElement) statusElement.textContent = `${prompt} (${i+1}/${frameCount})`;
+
+          // small jitter-proofing: add timestamp and attempt fast fetch
+          const frameRes = await fetch('/frame.jpg?ts=' + Date.now());
+          if(!frameRes.ok) throw new Error('frame fetch failed');
+          const blob = await frameRes.blob();
+          const reader = new FileReader();
+          const b64 = await new Promise((resolve, reject)=>{
+            reader.onload = ()=>resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          frames.push(b64);
+          // small pause between captures to allow movement to complete
+          await new Promise(r => setTimeout(r, 150));
+          hideCapturePrompt();
+        }catch(e){
+          console.error('Frame capture error', e);
+          hideCapturePrompt();
+        }
+      }
+
+      if(frames.length < 3) return { ok: false, is_live: false, frames };
+
+      // send to backend liveness check
+      const lres = await apiPost('/api/liveness/check', { frames });
+      if(statusElement){
+        if(lres && lres.ok && lres.is_live) statusElement.textContent = 'Liveness passed';
+        else statusElement.textContent = 'Liveness failed';
+      }
+      // attach frames so caller can reuse last frame for enrollment
+      if(lres && typeof lres === 'object') lres.frames = frames;
+      return lres;
     }catch(e){
-      return { ok: false, is_live: false };
+      console.error('liveness error', e);
+      showBanner('Backend offline');
+      return { ok: false, is_live: false, frames };
+    }finally{
+      showLoader(false);
     }
   }
 
   // ===== Face Management =====
   async function loadFaces(){
+    showLoader(true);
     try{
       const res = await fetch('/api/faces');
+      if(!res.ok) throw new Error('fetch failed');
       const data = await res.json();
       const $list = qs('#facesList');
       if(!$list) return;
-      
+
       $list.innerHTML = '';
       if(!data.faces || data.faces.length === 0){
         $list.innerHTML = '<div class="emptyState"><div class="emptyIcon">👤</div><div class="emptyText">No faces enrolled</div></div>';
         return;
       }
-      
+
       data.faces.forEach((face)=>{
         const $item = document.createElement('div');
         $item.className = 'item';
@@ -576,15 +903,25 @@
         $del.textContent = 'Delete';
         $del.addEventListener('click', async ()=>{
           if(!confirm('Delete "' + face.name + '"?')) return;
+          if(!isAdminAuthed){
+            // require admin authentication
+            $authModal.classList.remove('hidden');
+            return;
+          }
+          showLoader(true);
           try{
             const delRes = await fetch('/api/faces/' + face.id, { method: 'DELETE' });
             if(delRes.ok){
-              loadFaces();
-              showNotification('Face deleted');
+              await loadFaces();
+              showToast('Face deleted');
+            } else {
+              const dj = await delRes.json();
+              alert('Delete failed: ' + (dj.error || delRes.statusText));
             }
           }catch(e){
-            alert('Delete error: ' + e.message);
-          }
+            console.error('Delete error', e);
+            showBanner('Backend offline');
+          }finally{ showLoader(false); }
         });
         $item.appendChild($name);
         $item.appendChild($del);
@@ -592,6 +929,9 @@
       });
     }catch(e){
       console.error('Load faces error', e);
+      showBanner('Backend offline');
+    }finally{
+      showLoader(false);
     }
   }
 
@@ -599,18 +939,20 @@
 
   // ===== Logs =====
   async function loadLogs(){
+    showLoader(true);
     try{
       const res = await fetch('/api/logs');
+      if(!res.ok) throw new Error('fetch failed');
       const data = await res.json();
       const $list = qs('#logsList');
       if(!$list) return;
-      
+
       $list.innerHTML = '';
       if(!data.logs || data.logs.length === 0){
         $list.innerHTML = '<div class="emptyState"><div class="emptyIcon">📭</div><div class="emptyText">No events</div></div>';
         return;
       }
-      
+
       data.logs.slice(0, 20).forEach((log)=>{
         const $item = document.createElement('div');
         $item.className = 'item';
@@ -620,6 +962,9 @@
       });
     }catch(e){
       console.error('Load logs error', e);
+      showBanner('Backend offline');
+    }finally{
+      showLoader(false);
     }
   }
 
@@ -668,16 +1013,16 @@
           
           if(msg.event === 'recognized'){
             addActivity('Face recognized: ' + msg.detail, '✅');
-            // Update the name to display on the bbox
-            updateFaceBoxWithName(msg.detail);
-            // Show name overlay on camera feed
+            // Update welcome header and overlay
+            setWelcomeName(msg.detail);
             showRecognizedFace(msg.detail);
+            showToast('Welcome, ' + msg.detail);
             // Auto-unlock after a short delay
-            setTimeout(()=>{
-              autoUnlock(msg.detail);
-            }, 500);
+            setTimeout(()=>{ autoUnlock(msg.detail); }, 500);
           } else if(msg.event === 'deny'){
             addActivity('Access denied', '❌');
+            // Mark face as unknown
+            markFaceAsUnknown();
             showDeniedFace();
           } else if(msg.event === 'face_enrolled'){
             addActivity('Face enrolled: ' + msg.detail, '👤');

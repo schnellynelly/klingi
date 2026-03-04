@@ -154,6 +154,14 @@ async def auth_pin(req: PinReq):
     return {'ok': False, 'result': 'denied'}
 
 
+@router.post('/admin/login')
+def admin_login(req: PinReq):
+    """Verify admin PIN for frontend login. Returns {ok: True/False}."""
+    from app.main import SETTINGS
+    ok = verify_pin(req.pin, SETTINGS['PIN'])
+    return {'ok': bool(ok)}
+
+
 @router.get('/cam_status')
 def cam_status():
     """Return camera status and a quick frame probe for debugging."""

@@ -95,6 +95,34 @@ The server will be available at `http://localhost:8000`
 http://localhost:8000
 ```
 
+### Frontend React (development)
+
+This repo includes a new React + Vite frontend in `frontend-react/`.
+
+1. Install node deps:
+
+```bash
+cd frontend-react
+npm install
+```
+
+2. Run React dev server (proxies /api and /frame.jpg to backend:8000):
+
+```bash
+npm run dev
+# opens at http://localhost:5173
+```
+
+3. Run backend as usual (uvicorn on port 8000) in a separate terminal.
+
+To build for production:
+
+```bash
+cd frontend-react
+npm run build
+# copy/build output will be in frontend-react/dist and served by backend
+```
+
 ### Mobile Device
 1. Find your computer's IP address:
    - **Windows**: `ipconfig` → IPv4 Address

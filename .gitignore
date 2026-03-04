@@ -12,6 +12,12 @@ __pycache__/
 .vs/
 .vscode/
 
+# React build
+frontend-react/dist/
+
+# Node modules
+node_modules/
+
 # Environment files
 .env
 .env.*

@@ -84,17 +84,24 @@ async def ws(ws: WebSocket):
 
 app.include_router(api_router, prefix='/api')
 
-# Serve static files (CSS, JS, etc.)
+# Serve React build when available (production)
 BASE_DIR = os.path.dirname(__file__)
-STATIC_DIR = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'frontend', 'static'))
-app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
+REACT_DIST = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'frontend-react', 'dist'))
+if os.path.isdir(REACT_DIST):
+    # mount static assets from the React build
+    app.mount('/static', StaticFiles(directory=REACT_DIST), name='static')
+    INDEX_HTML = os.path.join(REACT_DIST, 'index.html')
 
-# Serve single-page frontend: return index.html for root
-# compute absolute path to index.html so FileResponse can stat it properly
-# BASE_DIR is backend/app; go up two levels to root then into frontend/templates
-INDEX_HTML = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'frontend', 'templates', 'index.html'))
+    @app.get('/')
+    def root():
+        return FileResponse(INDEX_HTML)
+else:
+    # Fallback to legacy frontend for development or before build
+    STATIC_DIR = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'frontend', 'static'))
+    app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
+    INDEX_HTML = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'frontend', 'templates', 'index.html'))
 
-@app.get('/')
-def root():
-    return FileResponse(INDEX_HTML)
+    @app.get('/')
+    def root():
+        return FileResponse(INDEX_HTML)
 

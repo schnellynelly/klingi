@@ -11,6 +11,15 @@
   </head>
   <body>
     <div class="app">
+      <!-- Top header with welcome name -->
+      <header class="appHeader">
+        <div class="appTitle">Klingi</div>
+        <div id="welcomeName" class="welcomeName"></div>
+      </header>
+
+      <!-- Global backend banner (hidden by default) -->
+      <div id="backendBanner" class="backendBanner hidden">Backend offline</div>
+
       <div id="authModal" class="modal hidden">
         <div class="modalContent">
           <h2>Admin Login</h2>
@@ -144,6 +153,7 @@
               <input id="enrollName" class="in" placeholder="Enter person's name" />
               <button id="enrollBtn" class="btn btnPrimary">Capture & Enroll</button>
             </div>
+            <div id="enrollError" class="error" style="display:none;margin-top:8px;"></div>
             <div class="hint">✓ Look directly at the camera<br/>✓ Blink naturally or move your head<br/>✓ Good lighting recommended</div>
           </div>
 

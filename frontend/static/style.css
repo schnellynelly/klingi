@@ -45,6 +45,30 @@ body {
   overflow: hidden;
 }
 
+/* Top header */
+.appHeader{
+  display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);z-index:30}
+.appTitle{font-weight:700;font-size:16px}
+.welcomeName{font-size:13px;color:var(--text-secondary)}
+
+/* Backend banner (top) */
+.backendBanner{position:fixed;left:50%;transform:translateX(-50%);top:72px;background:var(--danger);color:white;padding:8px 14px;border-radius:10px;z-index:120;box-shadow:0 8px 20px rgba(0,0,0,0.4)}
+.backendBanner.hidden{display:none}
+
+/* Global loader */
+.globalLoader{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:200;display:flex;align-items:center;justify-content:center}
+.globalLoader.hidden{display:none}
+.spinner{width:48px;height:48px;border-radius:50%;border:5px solid rgba(255,255,255,0.08);border-top-color:var(--accent);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Toast */
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:80px;background:rgba(0,0,0,0.7);color:white;padding:10px 16px;border-radius:14px;z-index:210;opacity:0;transition:all 200ms ease}
+.toast.visible{opacity:1;transform:translateX(-50%) translateY(-6px)}
+
+/* Capture prompt overlay near camera feed */
+.capturePrompt{position:absolute;left:50%;top:48%;transform:translate(-50%, -50%);background:rgba(0,0,0,0.75);color:white;padding:12px 18px;border-radius:12px;font-weight:700;z-index:40;font-size:16px;opacity:0;transition:all 140ms ease;pointer-events:none}
+.capturePrompt.visible{opacity:1;transform:translate(-50%, -50%) scale(1.02)}
+
 /* Page Container */
 .page {
   position: absolute;
